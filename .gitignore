@@ -1,0 +1,41 @@
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+.pytest_cache/
+.ruff_cache/
+.coverage
+htmlcov/
+.venv/
+venv/
+
+# Editors and operating systems
+.idea/
+.vscode/
+.DS_Store
+Thumbs.db
+
+# Biological data and generated artifacts
+/data/
+/results/
+/checkpoints/
+*.h5
+*.hdf5
+*.hic
+*.bigWig
+*.bw
+*.fa
+*.fasta
+*.fai
+*.gtf
+*.gtf.gz
+*.bed.gz
+*.part
+
+# Local experiment configurations may contain private paths
+configs/*.yaml
+!configs/*.example.yaml
+
+# Logs
+*.log
+metrics.jsonl

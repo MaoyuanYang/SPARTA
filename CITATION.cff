@@ -1,0 +1,20 @@
+cff-version: 1.2.0
+message: "If you use SPARTA, please cite the associated manuscript and this software."
+title: "SPARTA: Spatial and Physics-Aware Regulatory Transformer Architecture"
+type: software
+version: 1.0.0
+date-released: 2026-07-20
+license: MIT
+authors:
+  - family-names: Yang
+    given-names: Mao-Yuan
+  - family-names: Du
+    given-names: Pu-Feng
+repository-code: "https://github.com/MaoyuanYang/SPARTA"
+url: "https://github.com/MaoyuanYang/SPARTA"
+keywords:
+  - gene expression
+  - regulatory genomics
+  - chromatin conformation
+  - deep learning
+  - transformer

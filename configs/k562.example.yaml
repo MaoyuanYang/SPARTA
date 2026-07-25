@@ -1,0 +1,220 @@
+project:
+  name: SPARTA
+  cell_line: K562
+  genome_assembly: hg38
+
+pipeline:
+  download_missing: false
+
+resources:
+  histone_genes:
+    path: ../data/raw/reference/histone_genes.tsv
+    url: null
+    sha256: null
+    source_page: https://www.genenames.org/
+  gencode_gtf:
+    path: ../data/raw/reference/gencode.v48.annotation.gtf.gz
+    url: https://ftp.ebi.ac.uk/pub/databases/gencode/Gencode_human/release_48/gencode.v48.annotation.gtf.gz
+    sha256: null
+    source_page: https://www.gencodegenes.org/human/release_48.html
+  cage_peaks_bed:
+    path: ../data/raw/reference/hg38_fair_new_CAGE_peaks_phase1and2.bed
+    url: null
+    sha256: null
+    source_page: https://fantom.gsc.riken.jp/5/data/
+  cage_peak_names:
+    path: ../data/raw/reference/human_phase1and2_CAGE_peak_name.tsv
+    url: null
+    sha256: null
+    source_page: https://fantom.gsc.riken.jp/5/data/
+  cage_annotations:
+    path: ../data/raw/reference/hg38_liftover_new_CAGE_peaks_phase1and2_annot.tsv
+    url: null
+    sha256: null
+    source_page: https://fantom.gsc.riken.jp/5/data/
+  rna_seq:
+    path: ../data/raw/K562/rna_seq_gene_tpm.tsv
+    url: null
+    sha256: null
+    source_page: https://www.encodeproject.org/
+  atac_peaks:
+    path: ../data/raw/K562/atac_regulatory_nodes.bed
+    url: null
+    sha256: null
+    source_page: https://www.encodeproject.org/
+  reference_fasta:
+    path: ../data/raw/reference/hg38.fa
+    url: null
+    sha256: null
+    source_page: https://www.gencodegenes.org/human/
+  hic:
+    path: ../data/raw/K562/K562_ENCFF616PUW.hic
+    url: null
+    sha256: null
+    source_page: https://www.encodeproject.org/files/ENCFF616PUW/
+
+epigenomic_tracks:
+  ATAC:
+    path: ../data/raw/K562/ATAC_ENCFF102ARJ.bigWig
+    url: null
+    sha256: null
+    source_page: https://www.encodeproject.org/files/ENCFF102ARJ/
+  CTCF:
+    path: ../data/raw/K562/CTCF_ENCFF682MFJ.bigWig
+    url: null
+    sha256: null
+    source_page: https://www.encodeproject.org/files/ENCFF682MFJ/
+  RAD21:
+    path: ../data/raw/K562/RAD21_ENCFF715HLA.bigWig
+    url: null
+    sha256: null
+    source_page: https://www.encodeproject.org/files/ENCFF715HLA/
+  H3K27ac:
+    path: ../data/raw/K562/H3K27ac_ENCFF381NDD.bigWig
+    url: null
+    sha256: null
+    source_page: https://www.encodeproject.org/files/ENCFF381NDD/
+  H3K4me3:
+    path: ../data/raw/K562/H3K4me3_ENCFF253TOF.bigWig
+    url: null
+    sha256: null
+    source_page: https://www.encodeproject.org/files/ENCFF253TOF/
+  H3K4me1:
+    path: ../data/raw/K562/H3K4me1_ENCFF607SUJ.bigWig
+    url: null
+    sha256: null
+    source_page: https://www.encodeproject.org/files/ENCFF607SUJ/
+  H3K27me3:
+    path: ../data/raw/K562/H3K27me3_ENCFF139KZL.bigWig
+    url: null
+    sha256: null
+    source_page: https://www.encodeproject.org/files/ENCFF139KZL/
+  H3K9me3:
+    path: ../data/raw/K562/H3K9me3_ENCFF601JGK.bigWig
+    url: null
+    sha256: null
+    source_page: https://www.encodeproject.org/files/ENCFF601JGK/
+
+outputs:
+  tss_anchors: ../data/processed/K562/tss_anchors.tsv
+  gene_labels: ../data/processed/K562/gene_expression_labels.tsv
+  dataset_dir: ../data/processed/K562/hdf5
+  training_dir: ../results/K562
+
+data:
+  chromosomes:
+    - chr1
+    - chr2
+    - chr3
+    - chr4
+    - chr5
+    - chr6
+    - chr7
+    - chr8
+    - chr9
+    - chr10
+    - chr11
+    - chr12
+    - chr13
+    - chr14
+    - chr15
+    - chr16
+    - chr17
+    - chr18
+    - chr19
+    - chr20
+    - chr21
+    - chr22
+    - chrX
+  max_cage_distance_bp: 256
+  expression_columns:
+    gene_id: gene_id
+    tpm: TPM
+
+dataset:
+  max_nodes: 400
+  window_bp: 1024
+  regulatory_window_bp: 4000000
+  peak_selection: nearest
+  exclude_promoter_overlaps: true
+  hic_resolution_bp: 5000
+  hic_normalization: SCALE
+  epigenomic_log1p: true
+  expression_log2p1: true
+  expression_zscore: true
+  expression_zscore_ddof: 1
+  n_jobs: 4
+  batch_size: 16
+  compression: gzip
+  compression_level: 4
+
+model:
+  sequence_channels: 4
+  hidden_dim: 256
+  physics_layers: 4
+  physics_heads: 8
+  dropout: 0.1
+  insulation_projection_dim: 32
+  initial_distance_reference_bp: 10000.0
+  initial_distance_decay: 1.0
+  initial_temperature: 1.0
+  learnable_temperature: true
+
+training:
+  seed: 3407
+  device: auto
+  batch_size: 12
+  num_workers: 8
+  use_amp: true
+  gradient_clip_norm: 1.0
+  validation_interval: 1
+  resume: true
+  selected_epigenomic_tracks: null
+  train_chromosomes:
+    - chr1
+    - chr2
+    - chr3
+    - chr4
+    - chr5
+    - chr6
+    - chr7
+    - chr10
+    - chr11
+    - chr12
+    - chr13
+    - chr14
+    - chr15
+    - chr17
+    - chr18
+    - chr19
+    - chr20
+    - chr21
+  validation_chromosomes:
+    - chr16
+  test_chromosomes:
+    - chr8
+    - chr9
+  stage1:
+    epochs: 50
+    learning_rate: 0.0001
+    weight_decay: 0.0
+    stratified_hic_weight: 1.0
+    global_hic_weight: 1.0
+  stage2:
+    epochs: 30
+    backbone_learning_rate: 0.00001
+    readout_learning_rate: 0.0001
+    weight_decay: 0.01
+    stratified_hic_weight: 0.03
+    global_hic_weight: 0.03
+    expression_weight: 1.0
+  scheduler:
+    warmup_fraction: 0.1
+    warmup_start_factor: 0.01
+    minimum_learning_rate: 0.000001
+  hic_loss:
+    distance_bins_bp:
+      - 20000
+      - 100000
+    minimum_pairs_per_bin: 30
+    global_minimum_pairs: 100
