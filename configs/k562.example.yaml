@@ -9,7 +9,7 @@ pipeline:
 resources:
   histone_genes:
     path: ../data/raw/reference/histone_genes.tsv
-    url: null
+    url: https://www.genenames.org/cgi-bin/genegroup/download?id=864&type=branch
     sha256: null
     source_page: https://www.genenames.org/
   gencode_gtf:
@@ -18,80 +18,80 @@ resources:
     sha256: null
     source_page: https://www.gencodegenes.org/human/release_48.html
   cage_peaks_bed:
-    path: ../data/raw/reference/hg38_fair_new_CAGE_peaks_phase1and2.bed
-    url: null
+    path: ../data/raw/reference/hg38_fair+new_CAGE_peaks_phase1and2.bed.gz
+    url: https://fantom.gsc.riken.jp/5/datafiles/reprocessed/hg38_latest/extra/CAGE_peaks/hg38_fair+new_CAGE_peaks_phase1and2.bed.gz
     sha256: null
     source_page: https://fantom.gsc.riken.jp/5/data/
   cage_peak_names:
-    path: ../data/raw/reference/human_phase1and2_CAGE_peak_name.tsv
-    url: null
+    path: ../data/raw/reference/human_phase1and2_CAGE_Peak_name.txt.gz
+    url: https://fantom.gsc.riken.jp/5/datafiles/reprocessed/hg38_latest/extra/CAGE_peaks_annotation/human_phase1and2_CAGE_Peak_name.txt.gz
     sha256: null
     source_page: https://fantom.gsc.riken.jp/5/data/
   cage_annotations:
-    path: ../data/raw/reference/hg38_liftover_new_CAGE_peaks_phase1and2_annot.tsv
-    url: null
+    path: ../data/raw/reference/hg38_liftover+new_CAGE_peaks_phase1and2_annot.txt.gz
+    url: https://fantom.gsc.riken.jp/5/datafiles/reprocessed/hg38_latest/extra/CAGE_peaks_annotation/hg38_liftover+new_CAGE_peaks_phase1and2_annot.txt.gz
     sha256: null
     source_page: https://fantom.gsc.riken.jp/5/data/
   rna_seq:
-    path: ../data/raw/K562/rna_seq_gene_tpm.tsv
-    url: null
+    path: ../data/raw/K562/ENCFF068NRZ.tsv
+    url: https://www.encodeproject.org/files/ENCFF068NRZ/@@download/ENCFF068NRZ.tsv
     sha256: null
-    source_page: https://www.encodeproject.org/
+    source_page: https://www.encodeproject.org/files/ENCFF068NRZ/
   atac_peaks:
-    path: ../data/raw/K562/atac_regulatory_nodes.bed
-    url: null
+    path: ../data/raw/K562/ENCFF333TAT.bed.gz
+    url: https://www.encodeproject.org/files/ENCFF333TAT/@@download/ENCFF333TAT.bed.gz
     sha256: null
-    source_page: https://www.encodeproject.org/
+    source_page: https://www.encodeproject.org/files/ENCFF333TAT/
   reference_fasta:
     path: ../data/raw/reference/hg38.fa
-    url: null
+    url: http://hgdownload.soe.ucsc.edu/goldenpath/hg38/bigZips/hg38.fa.gz
     sha256: null
-    source_page: https://www.gencodegenes.org/human/
+    source_page: https://hgdownload.soe.ucsc.edu/goldenpath/hg38/bigZips/
   hic:
     path: ../data/raw/K562/K562_ENCFF616PUW.hic
-    url: null
+    url: https://www.encodeproject.org/files/ENCFF616PUW/@@download/ENCFF616PUW.hic
     sha256: null
     source_page: https://www.encodeproject.org/files/ENCFF616PUW/
 
 epigenomic_tracks:
   ATAC:
     path: ../data/raw/K562/ATAC_ENCFF102ARJ.bigWig
-    url: null
+    url: https://www.encodeproject.org/files/ENCFF102ARJ/@@download/ENCFF102ARJ.bigWig
     sha256: null
     source_page: https://www.encodeproject.org/files/ENCFF102ARJ/
   CTCF:
     path: ../data/raw/K562/CTCF_ENCFF682MFJ.bigWig
-    url: null
+    url: https://www.encodeproject.org/files/ENCFF682MFJ/@@download/ENCFF682MFJ.bigWig
     sha256: null
     source_page: https://www.encodeproject.org/files/ENCFF682MFJ/
   RAD21:
     path: ../data/raw/K562/RAD21_ENCFF715HLA.bigWig
-    url: null
+    url: https://www.encodeproject.org/files/ENCFF715HLA/@@download/ENCFF715HLA.bigWig
     sha256: null
     source_page: https://www.encodeproject.org/files/ENCFF715HLA/
   H3K27ac:
     path: ../data/raw/K562/H3K27ac_ENCFF381NDD.bigWig
-    url: null
+    url: https://www.encodeproject.org/files/ENCFF381NDD/@@download/ENCFF381NDD.bigWig
     sha256: null
     source_page: https://www.encodeproject.org/files/ENCFF381NDD/
   H3K4me3:
     path: ../data/raw/K562/H3K4me3_ENCFF253TOF.bigWig
-    url: null
+    url: https://www.encodeproject.org/files/ENCFF253TOF/@@download/ENCFF253TOF.bigWig
     sha256: null
     source_page: https://www.encodeproject.org/files/ENCFF253TOF/
   H3K4me1:
     path: ../data/raw/K562/H3K4me1_ENCFF607SUJ.bigWig
-    url: null
+    url: https://www.encodeproject.org/files/ENCFF607SUJ/@@download/ENCFF607SUJ.bigWig
     sha256: null
     source_page: https://www.encodeproject.org/files/ENCFF607SUJ/
   H3K27me3:
     path: ../data/raw/K562/H3K27me3_ENCFF139KZL.bigWig
-    url: null
+    url: https://www.encodeproject.org/files/ENCFF139KZL/@@download/ENCFF139KZL.bigWig
     sha256: null
     source_page: https://www.encodeproject.org/files/ENCFF139KZL/
   H3K9me3:
     path: ../data/raw/K562/H3K9me3_ENCFF601JGK.bigWig
-    url: null
+    url: https://www.encodeproject.org/files/ENCFF601JGK/@@download/ENCFF601JGK.bigWig
     sha256: null
     source_page: https://www.encodeproject.org/files/ENCFF601JGK/
 
@@ -189,6 +189,8 @@ training:
     - chr19
     - chr20
     - chr21
+    - chr22
+    - chrX
   validation_chromosomes:
     - chr16
   test_chromosomes:

@@ -29,6 +29,7 @@ two-stage optimization strategy described in the accompanying manuscript.
 .
 |-- configs/                 Reproducible experiment configurations
 |-- docs/                    Data and configuration documentation
+|   `-- Supplementary_Table_S1.xlsx   Accessions and download URLs for all cell lines
 |-- scripts/                 Direct command-line entry point
 |-- src/sparta/
 |   |-- data/                TSS curation, expression labels, and HDF5 datasets
@@ -65,40 +66,121 @@ python -m pip install -e .
 The `.hic` reader and BigWig dependencies may require platform-specific system
 libraries. See [Data preparation](docs/DATA.md) for expected inputs.
 
-## Quick start
+## End-to-end workflow
+
+The full workflow has six steps: configuration, data download, TSS/label
+curation, dataset construction, two-stage training, and held-out evaluation.
+Every step is driven by one YAML file, and every command below is also
+available without installing the package by replacing `sparta` with
+`python scripts/run_pipeline.py`.
+
+### 1. Prepare the configuration
 
 Copy the example configuration and replace every example path with the
-corresponding local file. Optional download URLs can also be provided for
-resources that permit direct download.
+corresponding local file:
 
 ```bash
 cp configs/k562.example.yaml configs/k562.yaml
-sparta validate --config configs/k562.yaml --check-files
-sparta run --config configs/k562.yaml --stage all
 ```
 
-The same workflow can be started without installing the package:
+Only the K562 example configuration is shipped. To run SPARTA on the other
+cell lines analyzed in the manuscript (GM12878, HCT116, HepG2, MCF-7, and
+A549), set `project.cell_line` accordingly and replace the K562 file paths and
+URLs. The ENCODE/4DN accessions and direct download URLs for every required
+file are listed in
+[docs/Supplementary_Table_S1.xlsx](docs/Supplementary_Table_S1.xlsx).
+
+### 2. Download input data
+
+The example configuration already contains direct `url` values for all
+required K562 resources (reference annotation, FANTOM5 CAGE, HGNC histone
+genes, hg38 FASTA, RNA-seq, ATAC-seq, ChIP-seq, and Hi-C). Download them with:
 
 ```bash
-python scripts/run_pipeline.py run --config configs/k562.yaml --stage all
+sparta run --config configs/k562.yaml --stage download
 ```
 
-`--stage all` runs TSS anchor curation, RNA-seq label integration, HDF5 dataset
-construction, two-stage training, and held-out test evaluation. Existing stage
-outputs are reused. Add `--force` to rebuild completed data stages.
+Files are written to the `path` of each resource and are not re-downloaded
+unless `--force` is given. Alternatively, download the files manually from the
+portals listed in the supplementary table. `source_page` entries are
+provenance metadata and are never scraped automatically.
 
-Individual stages are also available:
+Then verify the configuration and that all inputs exist:
+
+```bash
+sparta validate --config configs/k562.yaml --check-files
+```
+
+### 3. Curate TSS anchors and expression labels
 
 ```bash
 sparta run --config configs/k562.yaml --stage anchors
 sparta run --config configs/k562.yaml --stage labels
+```
+
+- `anchors` builds the MANE Select plus FANTOM5 CAGE-curated TSS table
+  (`outputs.tss_anchors`).
+- `labels` integrates RNA-seq TPM values, applying `log2(TPM + 1)` and global
+  z-score normalization (`outputs.gene_labels`).
+
+Each stage writes a `*.summary.json` next to its output and is skipped on
+re-runs unless `--force` is passed.
+
+### 4. Build the HDF5 dataset
+
+```bash
 sparta run --config configs/k562.yaml --stage dataset
+```
+
+This materializes one compressed HDF5 file per chromosome under
+`outputs.dataset_dir`, containing DNA one-hot sequences, eight epigenomic
+tracks in 1,024-bp node windows, 5-kb SCALE-normalized and
+observed-over-expected Hi-C matrices, node masks, and expression targets. A
+`_SUCCESS.json` marker records the construction summary. This is the most
+memory-intensive step; reduce `dataset.n_jobs` and `dataset.batch_size` if
+memory is limited.
+
+### 5. Two-stage training
+
+```bash
 sparta run --config configs/k562.yaml --stage train
 ```
 
-Use `--stage download` only after adding direct `url` values to the
-configuration. Source portal addresses are included as `source_page` metadata
-and are never scraped automatically.
+Training follows the manuscript's two-stage strategy:
+
+- **Stage 1 (physics pre-training):** the model is optimized on the
+  stratified and global Hi-C correlation losses with the three biochemical
+  readout heads frozen.
+- **Stage 2 (joint fine-tuning):** the full model is unfrozen and trained with
+  the expression loss plus down-weighted Hi-C losses, using a lower learning
+  rate for the pre-trained backbone than for the readout heads.
+
+Per-stage `last` and `best` checkpoints, a JSONL metric history
+(`metrics.jsonl`), and resolved run metadata are written to
+`outputs.training_dir`. Interrupted runs resume automatically when
+`training.resume: true`.
+
+### 6. Held-out evaluation
+
+Evaluation runs automatically at the end of the training stage. The best
+available checkpoints are loaded and the held-out test chromosomes (chr8 and
+chr9; chr16 was used for validation/model selection) are scored. Outputs in
+`outputs.training_dir`:
+
+- `test_predictions.tsv` — per-gene observed and predicted expression.
+- `run_complete.json` — test metrics (including Pearson correlation) and run
+  summary.
+
+### Run everything with one command
+
+```bash
+sparta run --config configs/k562.yaml --stage all
+```
+
+`--stage all` executes curation, dataset construction, training, and test
+evaluation in order, reusing existing stage outputs. Set
+`pipeline.download_missing: true` to prepend the download stage, and add
+`--force` to rebuild completed data stages.
 
 ## Method-to-code terminology
 

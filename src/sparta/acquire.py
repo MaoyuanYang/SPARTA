@@ -2,12 +2,14 @@
 
 from __future__ import annotations
 
+import gzip
 import hashlib
 import logging
 import shutil
 import urllib.request
 from pathlib import Path
 from typing import Any
+from urllib.parse import urlsplit
 
 from sparta.config import SpartaConfig
 
@@ -20,6 +22,10 @@ def _sha256(path: Path) -> str:
         for block in iter(lambda: handle.read(1024 * 1024), b""):
             digest.update(block)
     return digest.hexdigest()
+
+
+def _needs_decompression(url: str, target: Path) -> bool:
+    return urlsplit(url).path.lower().endswith(".gz") and target.suffix.lower() != ".gz"
 
 
 def _download(entry_name: str, entry: dict[str, Any], target: Path, force: bool) -> None:
@@ -35,6 +41,7 @@ def _download(entry_name: str, entry: dict[str, Any], target: Path, force: bool)
 
     target.parent.mkdir(parents=True, exist_ok=True)
     temporary = target.with_name(f"{target.name}.part")
+    decompressed = target.with_name(f"{target.name}.decompressed")
     LOGGER.info("Downloading %s from %s", entry_name, url)
     request = urllib.request.Request(url, headers={"User-Agent": "SPARTA/1.0"})
     try:
@@ -45,10 +52,17 @@ def _download(entry_name: str, entry: dict[str, Any], target: Path, force: bool)
             observed = _sha256(temporary)
             if observed.lower() != str(expected).lower():
                 raise ValueError(f"SHA-256 mismatch for '{entry_name}': expected {expected}, observed {observed}")
-        temporary.replace(target)
+        if _needs_decompression(url, target):
+            LOGGER.info("Decompressing %s to %s", entry_name, target)
+            with gzip.open(temporary, "rb") as source, decompressed.open("wb") as output:
+                shutil.copyfileobj(source, output)
+            decompressed.replace(target)
+        else:
+            temporary.replace(target)
     finally:
-        if temporary.exists():
-            temporary.unlink()
+        for artifact in (temporary, decompressed):
+            if artifact.exists():
+                artifact.unlink()
 
 
 def acquire_resources(config: SpartaConfig, force: bool = False) -> None:
