@@ -90,6 +90,10 @@ class SpartaTrainer:
             self.training_config["test_chromosomes"],
         )
         selected_tracks = self.training_config.get("selected_epigenomic_tracks")
+        self.data_generators = {
+            name: torch.Generator().manual_seed(self.seed + index)
+            for index, name in enumerate(("train", "validation", "test"))
+        }
         common_loader_arguments = {
             "batch_size": int(self.training_config.get("batch_size", 12)),
             "num_workers": int(self.training_config.get("num_workers", 4)),
@@ -102,6 +106,7 @@ class SpartaTrainer:
             shuffle=True,
             return_hic=True,
             return_metadata=False,
+            generator=self.data_generators["train"],
             **common_loader_arguments,
         )
         self.validation_loader = create_dataloader(
@@ -109,6 +114,7 @@ class SpartaTrainer:
             shuffle=False,
             return_hic=True,
             return_metadata=False,
+            generator=self.data_generators["validation"],
             **common_loader_arguments,
         )
         self.test_loader = create_dataloader(
@@ -116,9 +122,13 @@ class SpartaTrainer:
             shuffle=False,
             return_hic=False,
             return_metadata=True,
+            generator=self.data_generators["test"],
             **common_loader_arguments,
         )
 
+        self.train_loader.dataset.ensure_compatible(self.validation_loader.dataset, "validation split")
+        self.train_loader.dataset.ensure_compatible(self.test_loader.dataset, "test split")
+        self.input_metadata = self.train_loader.dataset.input_metadata
         epigenomic_channels = self.train_loader.dataset.number_of_epigenomic_tracks
         self.model = SpartaModel.from_config(
             self.model_config,
@@ -332,6 +342,10 @@ class SpartaTrainer:
                         batch,
                         stage,
                     )
+                if not torch.isfinite(loss):
+                    raise FloatingPointError(
+                        f"Non-finite loss during {description}. Check source data and numerical settings."
+                    )
                 if training:
                     self.scaler.scale(loss).backward()
                     self.scaler.unscale_(optimizer)
@@ -386,23 +400,68 @@ class SpartaTrainer:
         best_score: float,
         metrics: dict[str, Any],
     ) -> None:
-        torch.save(
-            {
-                "sparta_version": __version__,
-                "configuration_sha256": self.config.digest(),
-                "stage": stage,
-                "epoch": epoch,
-                "model_state": self.model.state_dict(),
-                "optimizer_state": optimizer.state_dict(),
-                "scheduler_state": scheduler.state_dict(),
-                "best_score": best_score,
-                "metrics": metrics,
+        checkpoint = {
+            "sparta_version": __version__,
+            "training_state_version": 1,
+            "configuration_sha256": self.config.digest(),
+            "input_metadata": self.input_metadata,
+            "stage": stage,
+            "epoch": epoch,
+            "model_state": self.model.state_dict(),
+            "optimizer_state": optimizer.state_dict(),
+            "scheduler_state": scheduler.state_dict(),
+            "scaler_state": self.scaler.state_dict(),
+            "rng_state": {
+                "python": random.getstate(),
+                "numpy": np.random.get_state(),
+                "torch": torch.get_rng_state(),
+                "cuda": torch.cuda.get_rng_state_all() if self.device.type == "cuda" else None,
+                "device_type": self.device.type,
             },
-            path,
-        )
+            "data_generator_states": {name: generator.get_state() for name, generator in self.data_generators.items()},
+            "worker_generator_states": {name: loader.generator.get_state() for name, loader in self._loaders().items()},
+            "best_score": best_score,
+            "metrics": metrics,
+        }
+        temporary = path.with_name(f"{path.name}.part")
+        try:
+            torch.save(checkpoint, temporary)
+            temporary.replace(path)
+        finally:
+            if temporary.exists():
+                temporary.unlink()
+
+    def _loaders(self) -> dict[str, Any]:
+        return {"train": self.train_loader, "validation": self.validation_loader, "test": self.test_loader}
+
+    def _restore_training_state(self, checkpoint: dict[str, Any]) -> None:
+        required = ("rng_state", "scaler_state", "data_generator_states", "worker_generator_states")
+        if checkpoint.get("training_state_version") != 1 or any(key not in checkpoint for key in required):
+            raise ValueError("Cannot resume a legacy checkpoint without complete training state. Start a new run.")
+        state = checkpoint["rng_state"]
+        if state["device_type"] != self.device.type:
+            raise ValueError("Exact checkpoint resume requires the same device type.")
+        cuda_states = state["cuda"]
+        if cuda_states is not None and len(cuda_states) != torch.cuda.device_count():
+            raise ValueError("Exact checkpoint resume requires the same CUDA device count.")
+        self.scaler.load_state_dict(checkpoint["scaler_state"])
+        for name, generator in self.data_generators.items():
+            generator.set_state(checkpoint["data_generator_states"][name].cpu())
+        for name, loader in self._loaders().items():
+            loader.generator.set_state(checkpoint["worker_generator_states"][name].cpu())
+        random.setstate(state["python"])
+        np.random.set_state(state["numpy"])
+        torch.set_rng_state(state["torch"].cpu())
+        if cuda_states is not None:
+            torch.cuda.set_rng_state_all([value.cpu() for value in cuda_states])
 
     def _load_model_checkpoint(self, path: Path) -> dict[str, Any]:
         checkpoint = torch.load(path, map_location=self.device, weights_only=False)
+        if checkpoint.get("input_metadata") != self.input_metadata:
+            raise ValueError(
+                f"Checkpoint input metadata/track order is missing or incompatible: {path}. "
+                "Use matching data and a checkpoint containing verified input metadata."
+            )
         self.model.load_state_dict(checkpoint["model_state"])
         return checkpoint
 
@@ -431,6 +490,7 @@ class SpartaTrainer:
                 raise ValueError(f"Cannot resume stage {stage}: configuration checksum differs from {last_path}")
             optimizer.load_state_dict(checkpoint["optimizer_state"])
             scheduler.load_state_dict(checkpoint["scheduler_state"])
+            self._restore_training_state(checkpoint)
             start_epoch = int(checkpoint["epoch"]) + 1
             best_score = float(checkpoint.get("best_score", -math.inf))
             LOGGER.info("Resuming stage %d at epoch %d.", stage, start_epoch)

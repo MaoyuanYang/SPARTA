@@ -94,6 +94,22 @@ Each chromosome HDF5 file contains:
 Metadata attributes record preprocessing transforms, track order, dimensions,
 Hi-C resolution, and label normalization statistics.
 
+Schema 1.1 stores epigenomic signals and both Hi-C tensors as float32, including
+the in-memory caches before log transforms. It also records
+`expression_zscore_ddof`, `exclude_promoter_overlaps`, and `peak_selection`.
+The loader compares preprocessing metadata across every chromosome and across
+the training, validation, and test splits. Missing required metadata or mismatched
+normalization, assembly, cell line, transforms, dimensions, or track order is an
+error. Full configuration checksums are not used for this comparison because
+training-only settings do not change preprocessing.
+
+Consistent schema 1.0 files with the required metadata remain readable. Optional
+attributes absent from all legacy files are treated as unknown; they must not
+be mixed with files recording different or known values. Do not infer missing
+metadata without verifying how a file was built. Files already containing
+`inf` or `NaN` must be rebuilt from the source data; changing their dtype cannot
+recover lost values. The loader reports the file, sample, and affected tensor.
+
 ## Storage and memory
 
 The full dataset is large. HDF5 tensors are compressed and written in bounded
@@ -101,3 +117,6 @@ batches, but chromosome-level BigWig and sparse Hi-C caches can still require
 substantial memory. Reduce `dataset.n_jobs` and `dataset.batch_size` if memory is
 limited. Do not commit generated HDF5 files, checkpoints, reference genomes, or
 raw tracks.
+
+Float32 doubles the uncompressed signal and contact storage compared with the
+old float16 representation; actual compressed file sizes depend on the data.

@@ -109,6 +109,22 @@ def _write_chromosome(path: Path, chromosome: str, offset: float) -> None:
         handle.attrs["window_bp"] = window_bp
         handle.attrs["number_of_epigenomic_tracks"] = 2
         handle.attrs["epigenomic_track_names"] = json.dumps(["ATAC", "CTCF"])
+        handle.attrs.update(
+            schema_version="1.1",
+            cell_line="K562",
+            genome_assembly="hg38",
+            regulatory_window_bp=4000000,
+            hic_resolution_bp=5000,
+            hic_normalization="SCALE",
+            epigenomic_log1p=True,
+            expression_log2p1=True,
+            expression_zscore=True,
+            expression_mean=0.0,
+            expression_std=1.0,
+            expression_zscore_ddof=1,
+            exclude_promoter_overlaps=True,
+            peak_selection="nearest",
+        )
 
 
 def test_two_stage_training_smoke(tmp_path: Path) -> None:

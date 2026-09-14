@@ -136,6 +136,7 @@ class RegulatoryNodeEncoder(nn.Module):
         self,
         dna_sequence: torch.Tensor,
         epigenomic_signals: torch.Tensor,
+        node_mask: torch.Tensor | None = None,
     ) -> torch.Tensor:
         if dna_sequence.ndim != 4 or epigenomic_signals.ndim != 4:
             raise ValueError("Expected DNA and epigenomic tensors with shapes [batch, nodes, channels, window].")
@@ -158,11 +159,25 @@ class RegulatoryNodeEncoder(nn.Module):
             epigenomic_channels,
             window_bp,
         )
+        valid_indices = None
+        if node_mask is not None:
+            if node_mask.shape != (batch_size, number_of_nodes) or node_mask.dtype != torch.bool:
+                raise ValueError("node_mask must be boolean with shape [batch, nodes].")
+            valid_indices = node_mask.reshape(-1).nonzero(as_tuple=False).flatten()
+            if valid_indices.numel() == 0:
+                raise ValueError("At least one valid node is required for encoding.")
+            # Padding must not enter BatchNorm statistics or consume CNN dropout.
+            sequence_inputs = sequence_inputs.index_select(0, valid_indices)
+            epigenomic_inputs = epigenomic_inputs.index_select(0, valid_indices)
         sequence_features = self.sequence_stem(sequence_inputs)
         epigenomic_features = self.epigenomic_stem(epigenomic_inputs)
         features = self.tower(torch.cat([sequence_features, epigenomic_features], dim=1))
         pooled = self._global_pool(features)
         embeddings = self.projection(pooled)
+        if valid_indices is not None:
+            embeddings = embeddings.new_zeros((batch_size * number_of_nodes, embeddings.shape[-1])).index_copy(
+                0, valid_indices, embeddings
+            )
         return embeddings.view(batch_size, number_of_nodes, -1)
 
 
@@ -590,6 +605,7 @@ class SpartaModel(nn.Module):
         node_embeddings = self.regulatory_node_encoder(
             dna_sequence,
             epigenomic_signals,
+            node_mask=node_mask,
         )
         if node_mask is not None:
             node_embeddings = node_embeddings * node_mask[:, :, None].to(node_embeddings.dtype)

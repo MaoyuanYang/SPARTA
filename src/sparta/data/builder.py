@@ -40,10 +40,7 @@ def _hic_chromosome_name(chromosome: str, available: list[str]) -> str:
     for candidate in (chromosome, bare, f"chr{bare}"):
         if candidate in available:
             return candidate
-    raise ValueError(
-        f"Chromosome '{chromosome}' is absent from the Hi-C file. "
-        f"Available examples: {available[:10]}"
-    )
+    raise ValueError(f"Chromosome '{chromosome}' is absent from the Hi-C file. Available examples: {available[:10]}")
 
 
 def _compression_arguments(config: SpartaConfig) -> dict[str, Any]:
@@ -109,7 +106,7 @@ class ChromosomeDataCache:
                     nan=0.0,
                     posinf=0.0,
                     neginf=0.0,
-                ).astype(np.float16)
+                ).astype(np.float32)
             finally:
                 bigwig.close()
 
@@ -172,9 +169,7 @@ class ChromosomeDataCache:
             chromosomes = hic.getChromosomes()
             chromosome_names = [entry.name for entry in chromosomes]
             hic_chromosome = _hic_chromosome_name(chromosome, chromosome_names)
-            chromosome_record = next(
-                entry for entry in chromosomes if entry.name == hic_chromosome
-            )
+            chromosome_record = next(entry for entry in chromosomes if entry.name == hic_chromosome)
             number_of_bins = math.ceil(chromosome_record.length / resolution_bp)
             end_coordinate = number_of_bins * resolution_bp
 
@@ -207,22 +202,17 @@ class ChromosomeDataCache:
                 end_coordinate,
             )
             if not observed_records:
-                raise ValueError(
-                    f"No observed Hi-C contacts found for {chromosome} at {resolution_bp} bp."
-                )
+                raise ValueError(f"No observed Hi-C contacts found for {chromosome} at {resolution_bp} bp.")
             if not oe_records:
                 raise ValueError(
-                    f"No observed-over-expected Hi-C contacts found for {chromosome} "
-                    f"at {resolution_bp} bp."
+                    f"No observed-over-expected Hi-C contacts found for {chromosome} at {resolution_bp} bp."
                 )
             return (
                 cls._records_to_sparse(observed_records, resolution_bp, number_of_bins),
                 cls._records_to_sparse(oe_records, resolution_bp, number_of_bins),
             )
         except Exception as error:
-            raise RuntimeError(
-                f"Failed to read Hi-C data for {chromosome} from {hic_path}: {error}"
-            ) from error
+            raise RuntimeError(f"Failed to read Hi-C data for {chromosome} from {hic_path}: {error}") from error
 
     def sequence_one_hot(self, start: int, end: int) -> np.ndarray:
         """Extract a fixed-length one-hot sequence with zero-padding at boundaries."""
@@ -237,9 +227,7 @@ class ChromosomeDataCache:
         right_padding = max(0, end - self.chromosome_length)
         padded = (b"N" * left_padding) + sequence + (b"N" * right_padding)
         if len(padded) != window_bp:
-            raise RuntimeError(
-                f"Sequence extraction returned {len(padded)} bp; expected {window_bp} bp."
-            )
+            raise RuntimeError(f"Sequence extraction returned {len(padded)} bp; expected {window_bp} bp.")
         encoded = np.frombuffer(padded, dtype=np.uint8)
         result = np.zeros((4, window_bp), dtype=np.uint8)
         result[0] = encoded == ord("A")
@@ -259,9 +247,7 @@ class ChromosomeDataCache:
             return result
         target_start = clipped_start - start
         target_end = target_start + (clipped_end - clipped_start)
-        result[target_start:target_end] = self.epigenomic_signals[track_name][
-            clipped_start:clipped_end
-        ]
+        result[target_start:target_end] = self.epigenomic_signals[track_name][clipped_start:clipped_end]
         return result
 
     def hic_submatrices(self, node_centers: np.ndarray) -> tuple[np.ndarray, np.ndarray]:
@@ -278,7 +264,7 @@ class ChromosomeDataCache:
             if invalid_indices.size:
                 values[invalid_indices, :] = 0
                 values[:, invalid_indices] = 0
-            return np.nan_to_num(values).astype(np.float16)
+            return np.nan_to_num(values).astype(np.float32)
 
         return extract(self.hic_scale), extract(self.hic_oe)
 
@@ -350,9 +336,7 @@ def _select_nodes(
             )[:maximum_peaks]
         candidate_centers = candidate_centers[selected]
 
-    nodes = np.concatenate(
-        [np.asarray([promoter], dtype=np.int64), candidate_centers.astype(np.int64)]
-    )
+    nodes = np.concatenate([np.asarray([promoter], dtype=np.int64), candidate_centers.astype(np.int64)])
     order = np.argsort(nodes, kind="stable")
     promoter_index = int(np.flatnonzero(order == 0)[0])
     return nodes[order], promoter_index
@@ -386,7 +370,7 @@ def _build_sample(
     dna_sequence = np.zeros((max_nodes, 4, window_bp), dtype=np.uint8)
     epigenomic_signals = np.zeros(
         (max_nodes, number_of_tracks, window_bp),
-        dtype=np.float16,
+        dtype=np.float32,
     )
     for node_index, center in enumerate(nodes):
         start = int(center) - half_window
@@ -396,10 +380,10 @@ def _build_sample(
             values = cache.epigenomic_window(track_name, start, end)
             if parameters.get("epigenomic_log1p", True):
                 values = np.log1p(np.maximum(values, 0.0))
-            epigenomic_signals[node_index, track_index] = values.astype(np.float16)
+            epigenomic_signals[node_index, track_index] = values.astype(np.float32)
 
-    hic_scale = np.zeros((max_nodes, max_nodes), dtype=np.float16)
-    hic_oe = np.zeros((max_nodes, max_nodes), dtype=np.float16)
+    hic_scale = np.zeros((max_nodes, max_nodes), dtype=np.float32)
+    hic_oe = np.zeros((max_nodes, max_nodes), dtype=np.float32)
     scale_values, oe_values = cache.hic_submatrices(nodes)
     hic_scale[:number_of_nodes, :number_of_nodes] = scale_values
     hic_oe[:number_of_nodes, :number_of_nodes] = oe_values
@@ -446,21 +430,21 @@ def _create_hdf5_datasets(
         "epigenomic_signals": handle.create_dataset(
             "epigenomic_signals",
             shape=(number_of_genes, max_nodes, number_of_tracks, window_bp),
-            dtype=np.float16,
+            dtype=np.float32,
             chunks=(1, max_nodes, number_of_tracks, window_bp),
             **compression,
         ),
         "hic_scale": handle.create_dataset(
             "hic_scale",
             shape=(number_of_genes, max_nodes, max_nodes),
-            dtype=np.float16,
+            dtype=np.float32,
             chunks=(1, max_nodes, max_nodes),
             **compression,
         ),
         "hic_oe": handle.create_dataset(
             "hic_oe",
             shape=(number_of_genes, max_nodes, max_nodes),
-            dtype=np.float16,
+            dtype=np.float32,
             chunks=(1, max_nodes, max_nodes),
             **compression,
         ),
@@ -625,7 +609,7 @@ def _write_chromosome(
                     len(genes),
                 )
 
-            handle.attrs["schema_version"] = "1.0"
+            handle.attrs["schema_version"] = "1.1"
             handle.attrs["sparta_version"] = __version__
             handle.attrs["model_class"] = "SpartaModel"
             handle.attrs["cell_line"] = str(config.get("project.cell_line"))
@@ -643,6 +627,9 @@ def _write_chromosome(
             handle.attrs["expression_zscore"] = bool(parameters.get("expression_zscore", True))
             handle.attrs["expression_mean"] = float(expression_mean)
             handle.attrs["expression_std"] = float(expression_std)
+            handle.attrs["expression_zscore_ddof"] = int(parameters.get("expression_zscore_ddof", 1))
+            handle.attrs["exclude_promoter_overlaps"] = bool(parameters.get("exclude_promoter_overlaps", True))
+            handle.attrs["peak_selection"] = str(parameters["peak_selection"])
             handle.attrs["configuration_sha256"] = config.digest()
         temporary_path.replace(output_path)
     except Exception:
@@ -665,9 +652,7 @@ def _prepare_gene_table(
 ) -> tuple[pd.DataFrame, float, float]:
     label_path = config.output_path("gene_labels")
     if not label_path.is_file():
-        raise FileNotFoundError(
-            f"Gene expression label table not found: {label_path}. Run the labels stage first."
-        )
+        raise FileNotFoundError(f"Gene expression label table not found: {label_path}. Run the labels stage first.")
     genes = pd.read_csv(label_path, sep="\t")
     required_columns = {"ensembl_id", "gene_symbol", "chrom", "strand", "tss_0based", "tpm"}
     missing = sorted(required_columns - set(genes.columns))
@@ -683,9 +668,7 @@ def _prepare_gene_table(
         expression = np.log2(expression + 1.0)
 
     expression_mean = float(expression.mean())
-    expression_std = float(
-        expression.std(ddof=int(parameters.get("expression_zscore_ddof", 1)))
-    )
+    expression_std = float(expression.std(ddof=int(parameters.get("expression_zscore_ddof", 1))))
     if parameters.get("expression_zscore", True):
         if not np.isfinite(expression_std) or expression_std <= 0:
             raise ValueError("Expression standard deviation must be positive for z-score normalization.")
@@ -765,7 +748,7 @@ def build_hdf5_dataset(config: SpartaConfig, force: bool = False) -> dict[str, A
     if not chromosome_summaries:
         raise ValueError("No chromosome datasets were generated.")
     return {
-        "schema_version": "1.0",
+        "schema_version": "1.1",
         "configuration_sha256": config.digest(),
         "expression_mean": expression_mean,
         "expression_std": expression_std,

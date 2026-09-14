@@ -23,6 +23,9 @@ resources:
 - `source_page` records provenance and is not downloaded.
 
 Epigenomic tracks use the same structure under `epigenomic_tracks`.
+Their insertion order defines dataset channel order and is included in the
+configuration checksum. Checkpoints also record the actual selected HDF5 track
+order and preprocessing metadata and reject incompatible inputs when loaded.
 
 ## Data curation
 
@@ -73,6 +76,16 @@ Epigenomic tracks use the same structure under `epigenomic_tracks`.
   runtime settings.
 - `training.validation_interval`: validation frequency in epochs.
 - `training.resume`: resume from per-stage last checkpoints.
+
+Resume restores the optimizer, scheduler, AMP gradient scaler, Python/NumPy/
+PyTorch random states, and separate data-sampling and worker-seeding generators.
+Checkpoints are replaced atomically after each completed epoch. Reproducible
+continuation requires the same configuration, data, device type, and runtime;
+it is an epoch-boundary guarantee for the current deterministic HDF5 reader,
+not mid-batch recovery or restoration of arbitrary worker-side random transforms.
+Legacy checkpoints lacking input metadata or complete training state cannot
+be resumed safely; start a new run in a separate output directory.
+See [training reliability](TRAINING_RELIABILITY.md) for validation and migration details.
 
 The `stage1` and `stage2` sections define epochs, learning rates, and loss
 weights. Stage 1 freezes the three biochemical readout heads. Stage 2 unfreezes

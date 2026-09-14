@@ -112,7 +112,12 @@ class SpartaConfig:
         return {name: self.resolve_path(entry["path"]) for name, entry in tracks.items()}
 
     def canonical_json(self) -> str:
-        return json.dumps(self.values, sort_keys=True, separators=(",", ":"), ensure_ascii=True)
+        values = copy.deepcopy(self.values)
+        tracks = values.get("epigenomic_tracks")
+        if isinstance(tracks, dict):
+            # Channel order is meaningful even though other mapping order is not.
+            values["epigenomic_tracks"] = list(tracks.items())
+        return json.dumps(values, sort_keys=True, separators=(",", ":"), ensure_ascii=True)
 
     def digest(self) -> str:
         return hashlib.sha256(self.canonical_json().encode("utf-8")).hexdigest()
