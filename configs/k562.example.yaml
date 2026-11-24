@@ -43,6 +43,11 @@ resources:
     url: https://www.encodeproject.org/files/ENCFF333TAT/@@download/ENCFF333TAT.bed.gz
     sha256: null
     source_page: https://www.encodeproject.org/files/ENCFF333TAT/
+  atac_blacklist:
+    path: ../data/raw/reference/hg38-blacklist.v2.bed.gz
+    url: https://raw.githubusercontent.com/Boyle-Lab/Blacklist/61a04d2c5e49341d76735d485c61f0d1177d08a8/lists/hg38-blacklist.v2.bed.gz
+    sha256: c92e763af17271446194991e71917ac220593a5a3d40a06667be24178ef08cf2
+    source_page: https://github.com/Boyle-Lab/Blacklist/blob/61a04d2c5e49341d76735d485c61f0d1177d08a8/lists/hg38-blacklist.v2.bed.gz
   reference_fasta:
     path: ../data/raw/reference/hg38.fa
     url: http://hgdownload.soe.ucsc.edu/goldenpath/hg38/bigZips/hg38.fa.gz

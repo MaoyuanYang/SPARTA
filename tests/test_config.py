@@ -17,6 +17,13 @@ def test_example_configuration_is_structurally_valid() -> None:
     assert report.errors == ()
 
 
+def test_blacklist_is_required_for_dataset_construction_but_not_legacy_training() -> None:
+    config = load_config(EXAMPLE_CONFIG)
+    del config.values["resources"]["atac_blacklist"]
+    assert any("atac_blacklist" in error for error in validate_config(config).errors)
+    assert validate_config(config, require_atac_blacklist=False).is_valid
+
+
 def test_relative_paths_are_resolved_from_configuration_directory() -> None:
     config = load_config(EXAMPLE_CONFIG)
     expected = (EXAMPLE_CONFIG.parent / "../data/raw/reference/histone_genes.tsv").resolve()

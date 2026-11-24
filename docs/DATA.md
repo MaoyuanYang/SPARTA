@@ -15,6 +15,7 @@ excluded from Git.
 | `resources.cage_annotations` | TSV | CAGE-to-gene annotations |
 | `resources.rna_seq` | TSV | Gene-level RNA-seq TPM values |
 | `resources.atac_peaks` | narrowPeak or BED | Candidate regulatory-node peaks |
+| `resources.atac_blacklist` | BED or BED.GZ | Assembly-matched intervals used to exclude ATAC peak centers |
 | `resources.reference_fasta` | FASTA | Reference genome sequence |
 | `resources.hic` | `.hic` | Chromatin contact data |
 | `epigenomic_tracks.*` | BigWig | Node-level epigenomic signals |
@@ -72,8 +73,15 @@ files, including downloads named `.bed.gz`. Set it to `bed` for other ten-column
 BED tables. If omitted or set to `auto`, SPARTA interprets exactly ten columns
 as narrowPeak and other supported BED tables as intervals.
 
-Before selecting nodes for any gene, SPARTA filters the candidate peaks on each
-chromosome in descending order of narrowPeak `signalValue` (column 7) or BED
+Before selecting nodes for any gene, SPARTA removes ATAC candidates whose
+center falls in a blacklist interval on the same chromosome. The zero-based
+BED interval contains a center when `start <= center < end`. A peak window
+may overlap a blacklist interval if its center lies outside. TSS anchors are
+curated separately. The K562 example uses the
+[Boyle Lab hg38 blacklist v2](https://github.com/Boyle-Lab/Blacklist/blob/61a04d2c5e49341d76735d485c61f0d1177d08a8/lists/hg38-blacklist.v2.bed.gz).
+
+SPARTA then processes the remaining peaks on each chromosome in descending
+order of narrowPeak `signalValue` (column 7) or BED
 `score` (column 5). Each retained center excludes candidates less than 512 bp
 away. Centers exactly 512 bp apart can both be retained. Equal strengths favor
 the smaller center coordinate, then the earlier input row for identical centers.
@@ -84,14 +92,14 @@ The K562 configuration then excludes windows overlapping each target promoter
 and selects up to 399 of the remaining peaks by proximity. Configurations with
 `dataset.peak_selection: score` use column 5 for this per-gene selection.
 
-Earlier versions used interval midpoints for raw narrowPeak files or accepted
-summits less than 512 bp apart. To apply both coordinate rules, build the
-dataset in a new `outputs.dataset_dir`. The dataset stage normally reuses
-compatible outputs. Use `--force` only if you
-intend to replace them. Results and weights from earlier runs correspond to
+To apply blacklist filtering to a dataset built by an earlier version, add
+`resources.atac_blacklist` to the configuration and build in a new
+`outputs.dataset_dir`, or use `--force` to replace the existing outputs.
+Results and weights from earlier runs correspond to
 the input coordinates used for those runs. New HDF5 files and the dataset
-summary record `peak_center_method` (`narrowpeak_summit` or `interval_midpoint`)
-and `min_peak_spacing_bp` (512).
+summary record `peak_center_method` (`narrowpeak_summit` or `interval_midpoint`),
+`min_peak_spacing_bp` (512), and `atac_blacklist_sha256`, the SHA-256 of the
+decompressed blacklist BED.
 
 ## Generated files
 

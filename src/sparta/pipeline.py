@@ -11,6 +11,7 @@ from pathlib import Path
 from sparta.acquire import acquire_resources
 from sparta.config import SpartaConfig, validate_config
 from sparta.data import MIN_PEAK_SPACING_BP
+from sparta.data.blacklist import blacklist_sha256, configured_blacklist_path
 
 LOGGER = logging.getLogger(__name__)
 DATA_STAGES = ("anchors", "labels", "dataset")
@@ -64,6 +65,11 @@ def _run_dataset(config: SpartaConfig, force: bool) -> None:
                 f"{marker} does not record min_peak_spacing_bp={MIN_PEAK_SPACING_BP}. "
                 "Use a new dataset directory or rebuild with --force."
             )
+        if summary.get("atac_blacklist_sha256") != blacklist_sha256(configured_blacklist_path(config)):
+            raise ValueError(
+                f"{marker} does not match the configured atac_blacklist_sha256. "
+                "Use a new dataset directory or rebuild with --force."
+            )
         if summary.get("configuration_sha256") == config.digest():
             LOGGER.info("Skipping HDF5 dataset construction; completion marker matches: %s", marker)
             return
@@ -92,7 +98,7 @@ def _run_training(config: SpartaConfig, force: bool) -> None:
 def run_pipeline(config: SpartaConfig, stage: str = "all", force: bool = False) -> None:
     """Run one stage or the complete configuration-driven workflow."""
 
-    report = validate_config(config, check_files=False)
+    report = validate_config(config, check_files=False, require_atac_blacklist=stage in {"dataset", "all"})
     for warning in report.warnings:
         LOGGER.warning(warning)
     report.raise_for_errors()

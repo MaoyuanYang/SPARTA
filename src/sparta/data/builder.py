@@ -20,20 +20,10 @@ from scipy import sparse
 
 from sparta import __version__
 from sparta.config import SpartaConfig
-from sparta.data import MIN_PEAK_SPACING_BP
+from sparta.data import MIN_PEAK_SPACING_BP, normalize_chromosome
+from sparta.data.blacklist import configured_blacklist_path, exclude_blacklisted_peaks
 
 LOGGER = logging.getLogger(__name__)
-
-
-def normalize_chromosome(value: str) -> str:
-    """Normalize chromosome names to the `chrN` convention."""
-
-    name = str(value).strip()
-    if name.lower().startswith("chr"):
-        name = name[3:]
-    if name.upper() in {"M", "MT"}:
-        return "chrM"
-    return f"chr{name}"
 
 
 def _hic_chromosome_name(chromosome: str, available: list[str]) -> str:
@@ -538,7 +528,7 @@ def _write_chromosome(
     chromosome: str,
     genes: pd.DataFrame,
     peaks: pd.DataFrame,
-    peak_center_method: str,
+    peak_metadata: dict[str, str | int],
     expression_mean: float,
     expression_std: float,
     output_path: Path,
@@ -632,8 +622,7 @@ def _write_chromosome(
             handle.attrs["expression_zscore_ddof"] = int(parameters.get("expression_zscore_ddof", 1))
             handle.attrs["exclude_promoter_overlaps"] = bool(parameters.get("exclude_promoter_overlaps", True))
             handle.attrs["peak_selection"] = str(parameters["peak_selection"])
-            handle.attrs["peak_center_method"] = peak_center_method
-            handle.attrs["min_peak_spacing_bp"] = MIN_PEAK_SPACING_BP
+            handle.attrs.update(peak_metadata)
             handle.attrs["configuration_sha256"] = config.digest()
         temporary_path.replace(output_path)
     except Exception:
@@ -740,8 +729,10 @@ def _prepare_peak_table(config: SpartaConfig) -> pd.DataFrame:
         centers = centers.where(offsets.eq(-1), peaks["start"] + offsets)
         strength = pd.to_numeric(raw.loc[peaks.index, 6], errors="coerce")
     peaks["center"] = centers.astype(np.int64)
+    peaks, blacklist_digest = exclude_blacklisted_peaks(peaks, configured_blacklist_path(config))
     peaks = _space_peak_centers(peaks, strength)
     peaks.attrs["peak_center_method"] = "narrowpeak_summit" if peak_format == "narrowpeak" else "interval_midpoint"
+    peaks.attrs["atac_blacklist_sha256"] = blacklist_digest
     return peaks
 
 
@@ -750,8 +741,11 @@ def build_hdf5_dataset(config: SpartaConfig, force: bool = False) -> dict[str, A
 
     genes, expression_mean, expression_std = _prepare_gene_table(config)
     peaks = _prepare_peak_table(config)
-    peak_center_method = peaks.attrs["peak_center_method"]
-    peak_metadata = {"peak_center_method": peak_center_method, "min_peak_spacing_bp": MIN_PEAK_SPACING_BP}
+    peak_metadata = {
+        "peak_center_method": peaks.attrs["peak_center_method"],
+        "min_peak_spacing_bp": MIN_PEAK_SPACING_BP,
+        "atac_blacklist_sha256": peaks.attrs["atac_blacklist_sha256"],
+    }
     output_dir = config.output_path("dataset_dir")
     output_dir.mkdir(parents=True, exist_ok=True)
     chromosomes = list(config.get("data.chromosomes"))
@@ -802,7 +796,7 @@ def build_hdf5_dataset(config: SpartaConfig, force: bool = False) -> dict[str, A
                 chromosome=chromosome,
                 genes=chromosome_genes,
                 peaks=chromosome_peaks,
-                peak_center_method=peak_center_method,
+                peak_metadata=peak_metadata,
                 expression_mean=expression_mean,
                 expression_std=expression_std,
                 output_path=output_path,

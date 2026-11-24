@@ -149,7 +149,9 @@ def load_config(path: str | Path) -> SpartaConfig:
     return SpartaConfig(source_path=source_path, values=values)
 
 
-def validate_config(config: SpartaConfig, check_files: bool = False) -> ValidationReport:
+def validate_config(
+    config: SpartaConfig, check_files: bool = False, *, require_atac_blacklist: bool = True
+) -> ValidationReport:
     """Validate structure, scientific defaults, and optionally input files."""
 
     errors: list[str] = []
@@ -160,7 +162,10 @@ def validate_config(config: SpartaConfig, check_files: bool = False) -> Validati
             errors.append(f"Missing or invalid '{section}' section.")
 
     resources = config.get("resources", {})
-    for name in REQUIRED_RESOURCES:
+    resource_names = REQUIRED_RESOURCES
+    if require_atac_blacklist or "atac_blacklist" in resources:
+        resource_names = (*resource_names, "atac_blacklist")
+    for name in resource_names:
         entry = resources.get(name)
         if not isinstance(entry, dict) or not entry.get("path"):
             errors.append(f"Resource '{name}' must define a path.")

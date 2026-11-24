@@ -24,6 +24,9 @@ resources:
 - `resources.atac_peaks.format` accepts `narrowPeak`, `bed`, or `auto`
   (default). See [ATAC peaks](DATA.md#atac-peaks) for the coordinate and
   format-detection rules.
+- `resources.atac_blacklist.path` supplies the reference blacklist BED or BED.GZ
+  for dataset construction. Choose intervals in the same genome assembly as the
+  ATAC peaks. The K562 example pins the hg38 v2 file and its download checksum.
 
 Epigenomic tracks use the same structure under `epigenomic_tracks`.
 Their insertion order defines dataset channel order and is included in the

@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import copy
 import gzip
+import hashlib
 import importlib
 import json
 import random
@@ -126,6 +127,17 @@ def builder(monkeypatch):
     return module
 
 
+def _peak_config(path: Path, peak_format: str | None = None, blacklist: Path | None = None) -> SpartaConfig:
+    if blacklist is None:
+        blacklist = path.parent / "empty_blacklist.bed"
+        blacklist.touch()
+    peaks = {"path": str(path)}
+    if peak_format:
+        peaks["format"] = peak_format
+    resources = {"atac_peaks": peaks, "atac_blacklist": {"path": str(blacklist)}}
+    return SpartaConfig(path.parent / "config.yaml", {"resources": resources})
+
+
 def test_narrowpeak_uses_summits_before_deduplicating_centers(builder, tmp_path):
     path = tmp_path / "peaks.bed.gz"
     with gzip.open(path, "wt", encoding="utf-8") as handle:
@@ -136,8 +148,7 @@ def test_narrowpeak_uses_summits_before_deduplicating_centers(builder, tmp_path)
             "chr1\t100\t121\td\t20\t.\t1\t1\t1\t-1\n"
             "chr2\t817494\t817520\te\t20\t.\t1\t1\t1\t0\n"
         )
-    config = SpartaConfig(tmp_path / "config.yaml", {"resources": {"atac_peaks": {"path": str(path)}}})
-    peaks = builder._prepare_peak_table(config)
+    peaks = builder._prepare_peak_table(_peak_config(path))
     assert list(zip(peaks["chrom"], peaks["center"], strict=True)) == [
         ("chr1", 110),
         ("chr1", 817494),
@@ -158,11 +169,7 @@ def test_narrowpeak_uses_summits_before_deduplicating_centers(builder, tmp_path)
 def test_bed_peak_windows_keep_their_interval_midpoints(builder, tmp_path, format_override, extra_columns):
     path = tmp_path / "peaks.bed"
     path.write_text(f"chr1\t10\t30\tp\t20{extra_columns}\n", encoding="utf-8")
-    resource = {"path": str(path)}
-    if format_override:
-        resource["format"] = format_override
-    config = SpartaConfig(tmp_path / "config.yaml", {"resources": {"atac_peaks": resource}})
-    assert builder._prepare_peak_table(config)["center"].tolist() == [20]
+    assert builder._prepare_peak_table(_peak_config(path, format_override))["center"].tolist() == [20]
 
 
 def test_narrowpeak_spacing_uses_signal_per_chromosome_and_keeps_exactly_512_bp(builder, tmp_path):
@@ -174,8 +181,7 @@ def test_narrowpeak_spacing_uses_signal_per_chromosome_and_keeps_exactly_512_bp(
         "chr2\t1511\t1513\tother_chrom\t1\t.\t20\t1\t1\t0\n",
         encoding="utf-8",
     )
-    config = SpartaConfig(tmp_path / "config.yaml", {"resources": {"atac_peaks": {"path": str(path)}}})
-    peaks = builder._prepare_peak_table(config)
+    peaks = builder._prepare_peak_table(_peak_config(path))
     assert list(peaks[["chrom", "center", "name", "score"]].itertuples(index=False, name=None)) == [
         ("chr1", 1000, "strongest", 5),
         ("chr1", 1512, "boundary", 3),
@@ -193,8 +199,7 @@ def test_bed_spacing_prefers_score_then_coordinate_then_input_order(builder, tmp
         "chr1\t3000\t3002\tsecond_left\t30\n",
         encoding="utf-8",
     )
-    config = SpartaConfig(tmp_path / "config.yaml", {"resources": {"atac_peaks": {"path": str(path)}}})
-    peaks = builder._prepare_peak_table(config)
+    peaks = builder._prepare_peak_table(_peak_config(path))
     assert list(peaks[["center", "name"]].itertuples(index=False, name=None)) == [
         (1201, "strong"),
         (3001, "first_left"),
@@ -205,9 +210,54 @@ def test_bed_spacing_prefers_score_then_coordinate_then_input_order(builder, tmp
 def test_narrowpeak_rejects_invalid_summit_offset(builder, tmp_path, offset):
     path = tmp_path / "peaks.bed"
     path.write_text(f"chr1\t10\t30\tp\t20\t.\t1\t1\t1\t{offset}\n", encoding="utf-8")
-    resource = {"path": str(path), "format": "narrowPeak"}
-    config = SpartaConfig(tmp_path / "config.yaml", {"resources": {"atac_peaks": resource}})
     with pytest.raises(ValueError, match="offset"):
+        builder._prepare_peak_table(_peak_config(path, "narrowPeak"))
+
+
+def test_blacklist_excludes_summits_before_spacing(builder, tmp_path):
+    path = tmp_path / "peaks.narrowPeak"
+    path.write_text(
+        "chr1\t900\t1020\tstart\t5\t.\t90\t1\t1\t100\n"
+        "chr1\t1190\t1220\tinside\t5\t.\t80\t1\t1\t10\n"
+        "chr1\t1390\t1420\tlast_base\t5\t.\t70\t1\t1\t9\n"
+        "chr1\t1300\t1520\tend\t5\t.\t1\t1\t1\t100\n"
+        "chr2\t900\t1020\tother_chrom\t5\t.\t90\t1\t1\t100\n",
+        encoding="utf-8",
+    )
+    blacklist = tmp_path / "blacklist.bed.gz"
+    with gzip.open(blacklist, "wt", encoding="utf-8") as handle:
+        handle.write("1\t1250\t1400\n1\t1000\t1300\n1\t1050\t1100\n")
+    peaks = builder._prepare_peak_table(_peak_config(path, blacklist=blacklist))
+    assert list(peaks[["chrom", "center"]].itertuples(index=False, name=None)) == [("chr1", 1400), ("chr2", 1000)]
+
+
+@pytest.mark.parametrize("extra", ["", "\t.\t5\t1\t1\t-1"], ids=["bed", "missing-summit"])
+def test_blacklist_uses_midpoint_for_interval_centers(builder, tmp_path, extra):
+    path = tmp_path / "peaks.bed"
+    path.write_text(f"chr1\t1000\t2000\tpeak\t9{extra}\n", encoding="utf-8")
+    blacklist = tmp_path / "blacklist.bed"
+    blacklist.write_text("chr1\t1500\t1501\n", encoding="utf-8")
+    assert builder._prepare_peak_table(_peak_config(path, blacklist=blacklist)).empty
+
+
+@pytest.mark.parametrize("interval", ["chr1\t20\t10", "chr1\t-1\t10", "chr1\t1.5\t10"])
+def test_invalid_blacklist_interval_is_rejected(builder, tmp_path, interval):
+    path = tmp_path / "peaks.bed"
+    path.write_text("chr1\t10\t30\tp\t20\n", encoding="utf-8")
+    blacklist = tmp_path / "blacklist.bed"
+    blacklist.write_text(interval + "\n", encoding="utf-8")
+    with pytest.raises(ValueError):
+        builder._prepare_peak_table(_peak_config(path, blacklist=blacklist))
+
+
+def test_building_peaks_requires_the_blacklist(builder, tmp_path):
+    path = tmp_path / "peaks.bed"
+    path.write_text("chr1\t10\t30\tp\t20\n", encoding="utf-8")
+    config = _peak_config(path, blacklist=tmp_path / "missing.bed")
+    with pytest.raises(FileNotFoundError):
+        builder._prepare_peak_table(config)
+    del config.values["resources"]["atac_blacklist"]
+    with pytest.raises(ValueError, match="atac_blacklist"):
         builder._prepare_peak_table(config)
 
 
@@ -442,12 +492,26 @@ def test_checkpoint_restores_random_streams_and_active_scaler(tmp_path):
         _close_trainer(trainer)
 
 
+def _configure_cache_test_blacklist(config, tmp_path):
+    blacklist = tmp_path / "blacklist.bed"
+    blacklist.write_bytes(b"chr1\t0\t2\n")
+    config.values["resources"]["atac_blacklist"] = {"path": str(blacklist)}
+    return hashlib.sha256(blacklist.read_bytes()).hexdigest()
+
+
 @pytest.mark.parametrize(
     "attribute,stale_value",
-    [("peak_center_method", None), ("min_peak_spacing_bp", None), ("min_peak_spacing_bp", 256)],
+    [
+        ("peak_center_method", None),
+        ("min_peak_spacing_bp", None),
+        ("min_peak_spacing_bp", 256),
+        ("atac_blacklist_sha256", None),
+        ("atac_blacklist_sha256", "0" * 64),
+    ],
 )
 def test_peak_metadata_follows_dataset_and_checkpoint_inputs(builder, monkeypatch, tmp_path, attribute, stale_value):
     config = _config(tmp_path, "peak_centers")
+    blacklist_digest = _configure_cache_test_blacklist(config, tmp_path)
     config.values["outputs"]["dataset_dir"] = str(tmp_path / "new_data")
     config.values["data"]["chromosomes"] = ["chr1"]
     config.values["dataset"].update(max_nodes=3, window_bp=4, n_jobs=1, hic_resolution_bp=16)
@@ -467,16 +531,19 @@ def test_peak_metadata_follows_dataset_and_checkpoint_inputs(builder, monkeypatc
     summary = builder.build_hdf5_dataset(config)
     assert summary["peak_center_method"] == "narrowpeak_summit"
     assert summary["min_peak_spacing_bp"] == 512
+    assert summary["atac_blacklist_sha256"] == blacklist_digest
     path = config.output_path("dataset_dir") / "chr1.h5"
     with h5py.File(path) as handle:
         assert handle.attrs["peak_center_method"] == "narrowpeak_summit"
         assert handle.attrs["min_peak_spacing_bp"] == 512
+        assert handle.attrs["atac_blacklist_sha256"] == blacklist_digest
         assert handle["genomic_coordinates"][0, :2].tolist() == [4, 19]
     assert builder.build_hdf5_dataset(config)["chromosomes"][0]["reused"]
 
     summit = SpartaHDF5Dataset(path)
     assert summit.input_metadata["preprocessing"]["peak_center_method"] == "narrowpeak_summit"
     assert summit.input_metadata["preprocessing"]["min_peak_spacing_bp"] == 512
+    assert summit.input_metadata["preprocessing"]["atac_blacklist_sha256"] == blacklist_digest
     with h5py.File(path, "a") as handle:
         if stale_value is None:
             del handle.attrs[attribute]
@@ -502,8 +569,13 @@ def test_dataset_stage_detects_legacy_completion_marker(tmp_path):
 @pytest.mark.parametrize("spacing", [None, 256, 512])
 def test_dataset_stage_checks_spacing_before_reusing_completion_marker(tmp_path, spacing):
     config = _config(tmp_path, "peak_spacing")
+    blacklist_digest = _configure_cache_test_blacklist(config, tmp_path)
     marker = config.output_path("dataset_dir") / "_SUCCESS.json"
-    summary = {"configuration_sha256": config.digest(), "peak_center_method": "narrowpeak_summit"}
+    summary = {
+        "configuration_sha256": config.digest(),
+        "peak_center_method": "narrowpeak_summit",
+        "atac_blacklist_sha256": blacklist_digest,
+    }
     if spacing is not None:
         summary["min_peak_spacing_bp"] = spacing
     marker.write_text(json.dumps(summary), encoding="utf-8")
@@ -512,3 +584,23 @@ def test_dataset_stage_checks_spacing_before_reusing_completion_marker(tmp_path,
     else:
         with pytest.raises(ValueError, match=r"min_peak_spacing_bp.*--force"):
             pipeline.run_pipeline(config, stage="dataset")
+
+
+def test_dataset_stage_checks_blacklist_contents_before_reusing_completion_marker(tmp_path):
+    config = _config(tmp_path, "blacklist_contents")
+    blacklist_digest = _configure_cache_test_blacklist(config, tmp_path)
+    marker = config.output_path("dataset_dir") / "_SUCCESS.json"
+    summary = {
+        "configuration_sha256": config.digest(),
+        "peak_center_method": "narrowpeak_summit",
+        "min_peak_spacing_bp": 512,
+    }
+    marker.write_text(json.dumps(summary), encoding="utf-8")
+    with pytest.raises(ValueError, match=r"atac_blacklist_sha256.*--force"):
+        pipeline.run_pipeline(config, stage="dataset")
+    summary["atac_blacklist_sha256"] = blacklist_digest
+    marker.write_text(json.dumps(summary), encoding="utf-8")
+    pipeline.run_pipeline(config, stage="dataset")
+    config.resource_path("atac_blacklist").write_bytes(b"chr1\t0\t3\n")
+    with pytest.raises(ValueError, match=r"atac_blacklist_sha256.*--force"):
+        pipeline.run_pipeline(config, stage="dataset")

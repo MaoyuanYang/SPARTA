@@ -99,7 +99,7 @@ class SpartaHDF5Dataset(Dataset):
                     {key: _metadata_value(handle.attrs.get(key)) for key in OPTIONAL_PREPROCESSING_ATTRIBUTES}
                 )
                 # Preserve the exact input metadata recorded in checkpoints built from legacy files.
-                for key in ("peak_center_method", "min_peak_spacing_bp"):
+                for key in ("peak_center_method", "min_peak_spacing_bp", "atac_blacklist_sha256"):
                     if key in handle.attrs:
                         attributes[key] = _metadata_value(handle.attrs[key])
                 for key in ("expression_mean", "expression_std"):
