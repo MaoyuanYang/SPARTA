@@ -21,6 +21,9 @@ resources:
 - `url` is optional and is used only by the `download` stage.
 - `sha256` is optional but recommended for direct downloads.
 - `source_page` records provenance and is not downloaded.
+- `resources.atac_peaks.format` accepts `narrowPeak`, `bed`, or `auto`
+  (default). See [ATAC peaks](DATA.md#atac-peaks) for the coordinate and
+  format-detection rules.
 
 Epigenomic tracks use the same structure under `epigenomic_tracks`.
 Their insertion order defines dataset channel order and is included in the

@@ -173,6 +173,9 @@ def validate_config(config: SpartaConfig, check_files: bool = False) -> Validati
                 else:
                     errors.append(f"Resource '{name}' does not exist: {path}")
 
+    if str(config.get("resources.atac_peaks.format", "auto")).lower() not in {"auto", "bed", "narrowpeak"}:
+        errors.append("resources.atac_peaks.format must be auto, bed, or narrowPeak.")
+
     tracks = config.get("epigenomic_tracks", {})
     if not isinstance(tracks, dict) or not tracks:
         errors.append("At least one epigenomic track is required.")

@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import copy
+import gzip
 import importlib
 import random
 import sys
@@ -15,6 +16,7 @@ import pytest
 import torch
 from scipy import sparse
 
+from sparta import pipeline
 from sparta.config import SpartaConfig, load_config
 from sparta.data.hdf5_dataset import SpartaHDF5Dataset
 from sparta.models import SpartaModel
@@ -121,6 +123,55 @@ def builder(monkeypatch):
     monkeypatch.setattr(module, "Fasta", Fasta)
     monkeypatch.setattr(module, "pyBigWig", types.SimpleNamespace(open=lambda _: BigWig()))
     return module
+
+
+def test_narrowpeak_uses_summits_before_deduplicating_centers(builder, tmp_path):
+    path = tmp_path / "peaks.bed.gz"
+    with gzip.open(path, "wt", encoding="utf-8") as handle:
+        handle.write(
+            "chr1\t817227\t818384\ta\t20\t.\t1\t1\t1\t267\n"
+            "chr1\t817227\t818384\tb\t20\t.\t1\t1\t1\t861\n"
+            "chr1\t817494\t817520\tc\t20\t.\t1\t1\t1\t0\n"
+            "chr1\t100\t121\td\t20\t.\t1\t1\t1\t-1\n"
+            "chr2\t817494\t817520\te\t20\t.\t1\t1\t1\t0\n"
+        )
+    config = SpartaConfig(tmp_path / "config.yaml", {"resources": {"atac_peaks": {"path": str(path)}}})
+    peaks = builder._prepare_peak_table(config)
+    assert list(zip(peaks["chrom"], peaks["center"], strict=True)) == [
+        ("chr1", 110),
+        ("chr1", 817494),
+        ("chr1", 818088),
+        ("chr2", 817494),
+    ]
+
+
+@pytest.mark.parametrize(
+    "format_override,extra_columns",
+    [
+        (None, ""),
+        ("bed", "\t+\t10\t30\t0\t2"),
+        (None, "\t+\t10\t30\t0\t2\t4,4\t0,16"),
+    ],
+    ids=["processed-bed5", "explicit-bed10", "bed12"],
+)
+def test_bed_peak_windows_keep_their_interval_midpoints(builder, tmp_path, format_override, extra_columns):
+    path = tmp_path / "peaks.bed"
+    path.write_text(f"chr1\t10\t30\tp\t20{extra_columns}\n", encoding="utf-8")
+    resource = {"path": str(path)}
+    if format_override:
+        resource["format"] = format_override
+    config = SpartaConfig(tmp_path / "config.yaml", {"resources": {"atac_peaks": resource}})
+    assert builder._prepare_peak_table(config)["center"].tolist() == [20]
+
+
+@pytest.mark.parametrize("offset", ["-2", "20", "1.5", "."])
+def test_narrowpeak_rejects_invalid_summit_offset(builder, tmp_path, offset):
+    path = tmp_path / "peaks.bed"
+    path.write_text(f"chr1\t10\t30\tp\t20\t.\t1\t1\t1\t{offset}\n", encoding="utf-8")
+    resource = {"path": str(path), "format": "narrowPeak"}
+    config = SpartaConfig(tmp_path / "config.yaml", {"resources": {"atac_peaks": resource}})
+    with pytest.raises(ValueError, match="offset"):
+        builder._prepare_peak_table(config)
 
 
 def test_large_finite_values_survive_cache_and_hic_extraction(builder, monkeypatch):
@@ -352,3 +403,49 @@ def test_checkpoint_restores_random_streams_and_active_scaler(tmp_path):
             trainer._restore_training_state(checkpoint)
     finally:
         _close_trainer(trainer)
+
+
+def test_peak_center_method_follows_dataset_and_checkpoint_inputs(builder, monkeypatch, tmp_path):
+    config = _config(tmp_path, "peak_centers")
+    config.values["outputs"]["dataset_dir"] = str(tmp_path / "new_data")
+    config.values["data"]["chromosomes"] = ["chr1"]
+    config.values["dataset"].update(max_nodes=3, window_bp=4, n_jobs=1, hic_resolution_bp=16)
+    labels = tmp_path / "labels.tsv"
+    labels.write_text(
+        "ensembl_id\tgene_symbol\tchrom\tstrand\ttss_0based\ttpm\n"
+        "ENSG1\tGENE1\tchr1\t+\t4\t1\nENSG2\tGENE2\tchr1\t+\t5\t2\n",
+        encoding="utf-8",
+    )
+    config.values["outputs"]["gene_labels"] = str(labels)
+    peaks = tmp_path / "peaks.bed"
+    peaks.write_text("chr1\t8\t24\ta\t1\t.\t1\t1\t1\t11\n", encoding="utf-8")
+    config.values["resources"]["atac_peaks"]["path"] = str(peaks)
+    contacts = sparse.eye(2, format="csr")
+    monkeypatch.setattr(builder.ChromosomeDataCache, "_load_hic_matrices", lambda *args: (contacts, contacts))
+
+    summary = builder.build_hdf5_dataset(config)
+    assert summary["peak_center_method"] == "narrowpeak_summit"
+    path = config.output_path("dataset_dir") / "chr1.h5"
+    with h5py.File(path) as handle:
+        assert handle.attrs["peak_center_method"] == "narrowpeak_summit"
+        assert handle["genomic_coordinates"][0, :2].tolist() == [4, 19]
+    assert builder.build_hdf5_dataset(config)["chromosomes"][0]["reused"]
+
+    summit = SpartaHDF5Dataset(path)
+    assert summit.input_metadata["preprocessing"]["peak_center_method"] == "narrowpeak_summit"
+    with h5py.File(path, "a") as handle:
+        del handle.attrs["peak_center_method"]
+    legacy = SpartaHDF5Dataset(path)
+    assert "peak_center_method" not in legacy.input_metadata["preprocessing"]
+    with pytest.raises(ValueError, match="peak_center_method"):
+        summit.ensure_compatible(legacy, "legacy test split")
+    with pytest.raises(ValueError, match=r"peak_center_method.*--force"):
+        builder.build_hdf5_dataset(config)
+
+
+def test_dataset_stage_detects_legacy_completion_marker(tmp_path):
+    config = _config(tmp_path, "legacy_peaks")
+    marker = config.output_path("dataset_dir") / "_SUCCESS.json"
+    marker.write_text("{}", encoding="utf-8")
+    with pytest.raises(ValueError, match="predates peak-center tracking"):
+        pipeline.run_pipeline(config, stage="dataset")

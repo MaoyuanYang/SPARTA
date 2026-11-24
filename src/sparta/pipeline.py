@@ -53,10 +53,19 @@ def _run_dataset(config: SpartaConfig, force: bool) -> None:
     output_dir = config.output_path("dataset_dir")
     marker = output_dir / "_SUCCESS.json"
     if marker.exists() and not force:
-        LOGGER.info("Skipping HDF5 dataset construction; completion marker exists: %s", marker)
-        return
+        summary = json.loads(marker.read_text(encoding="utf-8"))
+        if "peak_center_method" not in summary:
+            raise ValueError(
+                f"{marker} predates peak-center tracking. Use a new dataset directory or rebuild with --force."
+            )
+        if summary.get("configuration_sha256") == config.digest():
+            LOGGER.info("Skipping HDF5 dataset construction; completion marker matches: %s", marker)
+            return
     from sparta.data.builder import build_hdf5_dataset
 
+    if force:
+        # An interrupted rebuild may leave chromosomes from two different runs.
+        marker.unlink(missing_ok=True)
     summary = build_hdf5_dataset(config, force=force)
     _write_summary(marker, summary)
 

@@ -98,6 +98,9 @@ class SpartaHDF5Dataset(Dataset):
                 attributes.update(
                     {key: _metadata_value(handle.attrs.get(key)) for key in OPTIONAL_PREPROCESSING_ATTRIBUTES}
                 )
+                # Preserve the exact input metadata recorded in checkpoints built from legacy files.
+                if "peak_center_method" in handle.attrs:
+                    attributes["peak_center_method"] = _metadata_value(handle.attrs["peak_center_method"])
                 for key in ("expression_mean", "expression_std"):
                     if not math.isfinite(float(attributes[key])):
                         raise ValueError(f"Non-finite HDF5 preprocessing attribute {key} in {path}.")

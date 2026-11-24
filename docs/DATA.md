@@ -14,7 +14,7 @@ excluded from Git.
 | `resources.cage_peak_names` | TSV | FANTOM5 peak names used to select P1@ peaks |
 | `resources.cage_annotations` | TSV | CAGE-to-gene annotations |
 | `resources.rna_seq` | TSV | Gene-level RNA-seq TPM values |
-| `resources.atac_peaks` | BED | Candidate regulatory-node peaks |
+| `resources.atac_peaks` | narrowPeak or BED | Candidate regulatory-node peaks |
 | `resources.reference_fasta` | FASTA | Reference genome sequence |
 | `resources.hic` | `.hic` | Chromatin contact data |
 | `epigenomic_tracks.*` | BigWig | Node-level epigenomic signals |
@@ -60,14 +60,30 @@ collapsed by summing TPM values.
 
 ### ATAC peaks
 
-The first five BED columns are interpreted as:
+Both formats use the first five BED columns (`chrom`, `start`, `end`, `name`,
+`score`). For narrowPeak, SPARTA centers each node on the zero-based summit
+coordinate `start + peak`, where `peak` is the offset in column 10. An offset
+of `0` selects the first base. The narrowPeak sentinel `-1` selects the interval
+midpoint, rounded down. For BED input, SPARTA uses the interval midpoint. This
+also recovers the summit from BED windows already centered on it.
 
-```text
-chrom    start    end    name    score
-```
+Set `resources.atac_peaks.format` to `narrowPeak` for raw ENCODE narrowPeak
+files, including downloads named `.bed.gz`. Set it to `bed` for other ten-column
+BED tables. If omitted or set to `auto`, SPARTA interprets exactly ten columns
+as narrowPeak and other supported BED tables as intervals. Nodes with the same
+chromosome and center are deduplicated. Distinct summits in a shared interval
+remain separate candidates.
 
 When more than 399 peaks occur in a regulatory neighborhood, nodes are selected
 by genomic proximity or score according to `dataset.peak_selection`.
+
+Earlier versions used interval midpoints for raw narrowPeak files. To use the
+corrected coordinates, build the dataset in a new `outputs.dataset_dir`. The
+dataset stage normally reuses existing outputs. Use `--force` only if you
+intend to replace them. Results and weights from earlier runs correspond to
+the input coordinates used for those runs. New HDF5 files and the dataset
+summary record the applied rule as `peak_center_method` (`narrowpeak_summit`
+or `interval_midpoint`).
 
 ## Generated files
 

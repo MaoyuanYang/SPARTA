@@ -38,6 +38,7 @@ resources:
     sha256: null
     source_page: https://www.encodeproject.org/files/ENCFF068NRZ/
   atac_peaks:
+    format: narrowPeak
     path: ../data/raw/K562/ENCFF333TAT.bed.gz
     url: https://www.encodeproject.org/files/ENCFF333TAT/@@download/ENCFF333TAT.bed.gz
     sha256: null
