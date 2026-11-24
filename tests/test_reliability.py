@@ -5,6 +5,7 @@ from __future__ import annotations
 import copy
 import gzip
 import importlib
+import json
 import random
 import sys
 import types
@@ -162,6 +163,42 @@ def test_bed_peak_windows_keep_their_interval_midpoints(builder, tmp_path, forma
         resource["format"] = format_override
     config = SpartaConfig(tmp_path / "config.yaml", {"resources": {"atac_peaks": resource}})
     assert builder._prepare_peak_table(config)["center"].tolist() == [20]
+
+
+def test_narrowpeak_spacing_uses_signal_per_chromosome_and_keeps_exactly_512_bp(builder, tmp_path):
+    path = tmp_path / "peaks.narrowPeak"
+    path.write_text(
+        "chr1\t1511\t1513\tbetween\t999\t.\t20\t1\t1\t0\n"
+        "chr1\t1000\t1002\tstrongest\t5\t.\t30\t1\t1\t0\n"
+        "chr1\t1512\t1514\tboundary\t3\t.\t10\t1\t1\t0\n"
+        "chr2\t1511\t1513\tother_chrom\t1\t.\t20\t1\t1\t0\n",
+        encoding="utf-8",
+    )
+    config = SpartaConfig(tmp_path / "config.yaml", {"resources": {"atac_peaks": {"path": str(path)}}})
+    peaks = builder._prepare_peak_table(config)
+    assert list(peaks[["chrom", "center", "name", "score"]].itertuples(index=False, name=None)) == [
+        ("chr1", 1000, "strongest", 5),
+        ("chr1", 1512, "boundary", 3),
+        ("chr2", 1511, "other_chrom", 1),
+    ]
+
+
+def test_bed_spacing_prefers_score_then_coordinate_then_input_order(builder, tmp_path):
+    path = tmp_path / "peaks.bed"
+    path.write_text(
+        "chr1\t1000\t1002\tweak\t5\n"
+        "chr1\t1200\t1202\tstrong\t10\n"
+        "chr1\t3100\t3102\tright\t30\n"
+        "chr1\t3000\t3002\tfirst_left\t30\n"
+        "chr1\t3000\t3002\tsecond_left\t30\n",
+        encoding="utf-8",
+    )
+    config = SpartaConfig(tmp_path / "config.yaml", {"resources": {"atac_peaks": {"path": str(path)}}})
+    peaks = builder._prepare_peak_table(config)
+    assert list(peaks[["center", "name"]].itertuples(index=False, name=None)) == [
+        (1201, "strong"),
+        (3001, "first_left"),
+    ]
 
 
 @pytest.mark.parametrize("offset", ["-2", "20", "1.5", "."])
@@ -405,7 +442,11 @@ def test_checkpoint_restores_random_streams_and_active_scaler(tmp_path):
         _close_trainer(trainer)
 
 
-def test_peak_center_method_follows_dataset_and_checkpoint_inputs(builder, monkeypatch, tmp_path):
+@pytest.mark.parametrize(
+    "attribute,stale_value",
+    [("peak_center_method", None), ("min_peak_spacing_bp", None), ("min_peak_spacing_bp", 256)],
+)
+def test_peak_metadata_follows_dataset_and_checkpoint_inputs(builder, monkeypatch, tmp_path, attribute, stale_value):
     config = _config(tmp_path, "peak_centers")
     config.values["outputs"]["dataset_dir"] = str(tmp_path / "new_data")
     config.values["data"]["chromosomes"] = ["chr1"]
@@ -425,21 +466,28 @@ def test_peak_center_method_follows_dataset_and_checkpoint_inputs(builder, monke
 
     summary = builder.build_hdf5_dataset(config)
     assert summary["peak_center_method"] == "narrowpeak_summit"
+    assert summary["min_peak_spacing_bp"] == 512
     path = config.output_path("dataset_dir") / "chr1.h5"
     with h5py.File(path) as handle:
         assert handle.attrs["peak_center_method"] == "narrowpeak_summit"
+        assert handle.attrs["min_peak_spacing_bp"] == 512
         assert handle["genomic_coordinates"][0, :2].tolist() == [4, 19]
     assert builder.build_hdf5_dataset(config)["chromosomes"][0]["reused"]
 
     summit = SpartaHDF5Dataset(path)
     assert summit.input_metadata["preprocessing"]["peak_center_method"] == "narrowpeak_summit"
+    assert summit.input_metadata["preprocessing"]["min_peak_spacing_bp"] == 512
     with h5py.File(path, "a") as handle:
-        del handle.attrs["peak_center_method"]
+        if stale_value is None:
+            del handle.attrs[attribute]
+        else:
+            handle.attrs[attribute] = stale_value
     legacy = SpartaHDF5Dataset(path)
-    assert "peak_center_method" not in legacy.input_metadata["preprocessing"]
-    with pytest.raises(ValueError, match="peak_center_method"):
+    if stale_value is None:
+        assert attribute not in legacy.input_metadata["preprocessing"]
+    with pytest.raises(ValueError, match=attribute):
         summit.ensure_compatible(legacy, "legacy test split")
-    with pytest.raises(ValueError, match=r"peak_center_method.*--force"):
+    with pytest.raises(ValueError, match=rf"{attribute}.*--force"):
         builder.build_hdf5_dataset(config)
 
 
@@ -449,3 +497,18 @@ def test_dataset_stage_detects_legacy_completion_marker(tmp_path):
     marker.write_text("{}", encoding="utf-8")
     with pytest.raises(ValueError, match="predates peak-center tracking"):
         pipeline.run_pipeline(config, stage="dataset")
+
+
+@pytest.mark.parametrize("spacing", [None, 256, 512])
+def test_dataset_stage_checks_spacing_before_reusing_completion_marker(tmp_path, spacing):
+    config = _config(tmp_path, "peak_spacing")
+    marker = config.output_path("dataset_dir") / "_SUCCESS.json"
+    summary = {"configuration_sha256": config.digest(), "peak_center_method": "narrowpeak_summit"}
+    if spacing is not None:
+        summary["min_peak_spacing_bp"] = spacing
+    marker.write_text(json.dumps(summary), encoding="utf-8")
+    if spacing == 512:
+        pipeline.run_pipeline(config, stage="dataset")
+    else:
+        with pytest.raises(ValueError, match=r"min_peak_spacing_bp.*--force"):
+            pipeline.run_pipeline(config, stage="dataset")

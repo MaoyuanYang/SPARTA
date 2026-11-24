@@ -70,20 +70,28 @@ also recovers the summit from BED windows already centered on it.
 Set `resources.atac_peaks.format` to `narrowPeak` for raw ENCODE narrowPeak
 files, including downloads named `.bed.gz`. Set it to `bed` for other ten-column
 BED tables. If omitted or set to `auto`, SPARTA interprets exactly ten columns
-as narrowPeak and other supported BED tables as intervals. Nodes with the same
-chromosome and center are deduplicated. Distinct summits in a shared interval
-remain separate candidates.
+as narrowPeak and other supported BED tables as intervals.
 
-When more than 399 peaks occur in a regulatory neighborhood, nodes are selected
-by genomic proximity or score according to `dataset.peak_selection`.
+Before selecting nodes for any gene, SPARTA filters the candidate peaks on each
+chromosome in descending order of narrowPeak `signalValue` (column 7) or BED
+`score` (column 5). Each retained center excludes candidates less than 512 bp
+away. Centers exactly 512 bp apart can both be retained. Equal strengths favor
+the smaller center coordinate, then the earlier input row for identical centers.
+The spacing applies across the chromosome, including summits in the same input
+interval.
 
-Earlier versions used interval midpoints for raw narrowPeak files. To use the
-corrected coordinates, build the dataset in a new `outputs.dataset_dir`. The
-dataset stage normally reuses existing outputs. Use `--force` only if you
+The K562 configuration then excludes windows overlapping each target promoter
+and selects up to 399 of the remaining peaks by proximity. Configurations with
+`dataset.peak_selection: score` use column 5 for this per-gene selection.
+
+Earlier versions used interval midpoints for raw narrowPeak files or accepted
+summits less than 512 bp apart. To apply both coordinate rules, build the
+dataset in a new `outputs.dataset_dir`. The dataset stage normally reuses
+compatible outputs. Use `--force` only if you
 intend to replace them. Results and weights from earlier runs correspond to
 the input coordinates used for those runs. New HDF5 files and the dataset
-summary record the applied rule as `peak_center_method` (`narrowpeak_summit`
-or `interval_midpoint`).
+summary record `peak_center_method` (`narrowpeak_summit` or `interval_midpoint`)
+and `min_peak_spacing_bp` (512).
 
 ## Generated files
 

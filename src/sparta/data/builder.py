@@ -20,6 +20,7 @@ from scipy import sparse
 
 from sparta import __version__
 from sparta.config import SpartaConfig
+from sparta.data import MIN_PEAK_SPACING_BP
 
 LOGGER = logging.getLogger(__name__)
 
@@ -632,6 +633,7 @@ def _write_chromosome(
             handle.attrs["exclude_promoter_overlaps"] = bool(parameters.get("exclude_promoter_overlaps", True))
             handle.attrs["peak_selection"] = str(parameters["peak_selection"])
             handle.attrs["peak_center_method"] = peak_center_method
+            handle.attrs["min_peak_spacing_bp"] = MIN_PEAK_SPACING_BP
             handle.attrs["configuration_sha256"] = config.digest()
         temporary_path.replace(output_path)
     except Exception:
@@ -682,6 +684,28 @@ def _prepare_gene_table(
     return genes, expression_mean, expression_std
 
 
+def _space_peak_centers(peaks: pd.DataFrame, strength: pd.Series) -> pd.DataFrame:
+    """Keep peaks in descending signal order, enforcing spacing within each chromosome."""
+
+    retained = []
+    for _, group in peaks.groupby("chrom", sort=True):
+        group = group.sort_values("center", kind="stable")
+        centers = group["center"].to_numpy()
+        # Open bounds retain centers exactly MIN_PEAK_SPACING_BP apart.
+        left = centers.searchsorted(centers - MIN_PEAK_SPACING_BP, side="right")
+        right = centers.searchsorted(centers + MIN_PEAK_SPACING_BP, side="left")
+        suppressed = np.zeros(len(group), dtype=bool)
+        keep = np.zeros(len(group), dtype=bool)
+        # Stable ranking breaks ties by center, then by input order for identical centers.
+        priority = np.argsort(-strength.loc[group.index].to_numpy(dtype=np.float64), kind="stable")
+        for index in priority:
+            if not suppressed[index]:
+                keep[index] = True
+                suppressed[left[index] : right[index]] = True
+        retained.extend(group.index[keep])
+    return peaks.loc[retained].copy()
+
+
 def _prepare_peak_table(config: SpartaConfig) -> pd.DataFrame:
     raw = pd.read_csv(config.resource_path("atac_peaks"), sep="\t", header=None, comment="#")
     peak_format = str(config.get("resources.atac_peaks.format", "auto")).lower()
@@ -702,6 +726,7 @@ def _prepare_peak_table(config: SpartaConfig) -> pd.DataFrame:
     peaks["score"] = pd.to_numeric(peaks["score"], errors="coerce").fillna(0.0)
     peaks = peaks.dropna(subset=["start", "end"]).copy()
     centers = (peaks["start"] + peaks["end"]) // 2
+    strength = peaks["score"]
     if peak_format == "narrowpeak":
         offsets = pd.to_numeric(raw.loc[peaks.index, 9], errors="coerce")
         valid = offsets.eq(-1) | (offsets.ge(0) & offsets.lt(peaks["end"] - peaks["start"]) & offsets.mod(1).eq(0))
@@ -713,8 +738,9 @@ def _prepare_peak_table(config: SpartaConfig) -> pd.DataFrame:
                 "Expected -1 or an integer offset inside the peak interval."
             )
         centers = centers.where(offsets.eq(-1), peaks["start"] + offsets)
+        strength = pd.to_numeric(raw.loc[peaks.index, 6], errors="coerce")
     peaks["center"] = centers.astype(np.int64)
-    peaks = peaks.sort_values(["chrom", "center"]).drop_duplicates(["chrom", "center"])
+    peaks = _space_peak_centers(peaks, strength)
     peaks.attrs["peak_center_method"] = "narrowpeak_summit" if peak_format == "narrowpeak" else "interval_midpoint"
     return peaks
 
@@ -725,6 +751,7 @@ def build_hdf5_dataset(config: SpartaConfig, force: bool = False) -> dict[str, A
     genes, expression_mean, expression_std = _prepare_gene_table(config)
     peaks = _prepare_peak_table(config)
     peak_center_method = peaks.attrs["peak_center_method"]
+    peak_metadata = {"peak_center_method": peak_center_method, "min_peak_spacing_bp": MIN_PEAK_SPACING_BP}
     output_dir = config.output_path("dataset_dir")
     output_dir.mkdir(parents=True, exist_ok=True)
     chromosomes = list(config.get("data.chromosomes"))
@@ -736,12 +763,13 @@ def build_hdf5_dataset(config: SpartaConfig, force: bool = False) -> dict[str, A
             existing = output_dir / f"{chromosome}.h5"
             if existing.is_file():
                 with h5py.File(existing, "r") as handle:
-                    stored_method = handle.attrs.get("peak_center_method")
-                if stored_method != peak_center_method:
-                    raise ValueError(
-                        f"Cannot reuse {existing}: peak_center_method={stored_method!r}, "
-                        f"expected {peak_center_method!r}. Use a new dataset directory or rebuild with --force."
-                    )
+                    for key, expected in peak_metadata.items():
+                        stored = handle.attrs.get(key)
+                        if stored != expected:
+                            raise ValueError(
+                                f"Cannot reuse {existing}: {key}={stored!r}, expected {expected!r}. "
+                                "Use a new dataset directory or rebuild with --force."
+                            )
 
     for chromosome in chromosomes:
         chromosome_genes = genes.loc[genes["_chromosome"] == chromosome].reset_index(drop=True)
@@ -786,7 +814,7 @@ def build_hdf5_dataset(config: SpartaConfig, force: bool = False) -> dict[str, A
     return {
         "schema_version": "1.1",
         "configuration_sha256": config.digest(),
-        "peak_center_method": peak_center_method,
+        **peak_metadata,
         "expression_mean": expression_mean,
         "expression_std": expression_std,
         "total_genes": int(sum(item["genes"] for item in chromosome_summaries)),

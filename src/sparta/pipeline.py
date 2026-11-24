@@ -10,6 +10,7 @@ from pathlib import Path
 
 from sparta.acquire import acquire_resources
 from sparta.config import SpartaConfig, validate_config
+from sparta.data import MIN_PEAK_SPACING_BP
 
 LOGGER = logging.getLogger(__name__)
 DATA_STAGES = ("anchors", "labels", "dataset")
@@ -57,6 +58,11 @@ def _run_dataset(config: SpartaConfig, force: bool) -> None:
         if "peak_center_method" not in summary:
             raise ValueError(
                 f"{marker} predates peak-center tracking. Use a new dataset directory or rebuild with --force."
+            )
+        if summary.get("min_peak_spacing_bp") != MIN_PEAK_SPACING_BP:
+            raise ValueError(
+                f"{marker} does not record min_peak_spacing_bp={MIN_PEAK_SPACING_BP}. "
+                "Use a new dataset directory or rebuild with --force."
             )
         if summary.get("configuration_sha256") == config.digest():
             LOGGER.info("Skipping HDF5 dataset construction; completion marker matches: %s", marker)
